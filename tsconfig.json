@@ -1,0 +1,7 @@
+{
+  "compilerOptions": {
+    "types": ["nativewind/types", "node"]
+  },
+  "exclude": ["functions"],
+  "extends": "expo/tsconfig.base"
+}

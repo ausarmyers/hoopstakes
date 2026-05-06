@@ -1,0 +1,35 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /users/{userId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    match /transactions/{transactionId} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.type in ['stake', 'win', 'cashout']
+        && (
+          request.resource.data.type != 'cashout'
+          || isValidCashout(
+            request.resource.data.tier,
+            request.resource.data.amount,
+            request.resource.data.preCashoutEarnedBalance,
+            request.resource.data.postCashoutEarnedBalance
+          )
+        );
+    }
+  }
+
+  function isValidCashout(tier, amount, preBalance, postBalance) {
+    return amount > 0
+      && postBalance >= 1
+      && amount <= preBalance
+      && (
+        (tier == 'hoopster' && amount >= 10)
+        || (tier == 'elite' && amount >= 5)
+      );
+  }
+}
