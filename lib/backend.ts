@@ -5,25 +5,34 @@ export async function submitMatchResult(payload: {
   opponentUid: string;
   myScore: number;
   opponentScore: number;
+  courtId?: string;
+  courtCity?: string;
+  courtHasAdmin?: boolean;
+  courtQrCode?: string;
 }) {
   const callable = httpsCallable(functions, 'submitMatchResult');
   const result = await callable(payload);
-  return result.data as { matchId: string; status: string };
+  return result.data as { matchId: string; status: string; videoProofRequired?: boolean };
 }
 
-export async function confirmMatchResult(matchId: string) {
+export async function confirmMatchResult(matchId: string, options?: { adminVerified?: boolean; adminQrCode?: string }) {
   const callable = httpsCallable(functions, 'confirmMatchResult');
-  await callable({ matchId });
+  await callable({
+    matchId,
+    adminVerified: options?.adminVerified ?? false,
+    adminQrCode: options?.adminQrCode ?? '',
+  });
 }
 
-export async function openMatchDispute(matchId: string, reason: string) {
-  const callable = httpsCallable(functions, 'openMatchDispute');
+export async function reportMatch(matchId: string, reason: string) {
+  const callable = httpsCallable(functions, 'reportMatch');
   await callable({ matchId, reason });
 }
 
 export async function requestCashout(amount: number) {
   const callable = httpsCallable(functions, 'requestCashout');
-  await callable({ amount });
+  const result = await callable({ amount });
+  return result.data as { ok: boolean; videoProofRequired: boolean; cashoutCount: number };
 }
 
 export async function ingestAnalyticsEvent(eventName: string, payload: Record<string, unknown>) {
@@ -55,13 +64,16 @@ export async function getLeoBreakdownDetails(targetUid?: string) {
       tier: string;
       positionAbbr: string;
       leoScore: number;
+      displayLeoScore: number;
       hooperTier: string;
+      isCalibrating: boolean;
     };
     metrics: {
       winRate: number;
       avgMargin: number;
       winStreak: number;
       gamesThisWeek: number;
+      totalGames: number;
     };
     breakdown: {
       winRatePoints: number;

@@ -1,6 +1,9 @@
 import { View, Text, ScrollView, TouchableOpacity, Linking } from 'react-native';
 import { useStore } from '../lib/store';
 import { logAnalyticsEvent } from '../lib/telemetry';
+import { RequireTier } from '../lib/RequireTier';
+import { router } from 'expo-router';
+import * as Haptic from 'expo-haptics';
 
 const PAST_WINNERS = [
   {
@@ -30,27 +33,45 @@ export default function TournamentHub() {
         <Text className="text-gray-600">Structured 3v3 and 5v5 runs with trust-first video proof.</Text>
       </View>
 
-      <View className="px-6 mb-6 gap-3">
-        {tournaments.map((tournament) => (
-          <View key={tournament.id} className="bg-white border border-gray-200 rounded-2xl p-4">
-            <Text className="font-bold text-gray-900 text-base">{tournament.name}</Text>
-            <Text className="text-xs text-gray-600 mt-1">{tournament.minTier}+ | {tournament.stakeLabel}</Text>
-            <Text className="text-xs text-gray-600 mt-1">Venue: {tournament.venueType}</Text>
+      <RequireTier
+        minTier="hoopster"
+        fallback={
+          <View className="mx-6 mb-6 rounded-2xl border border-orange-200 bg-orange-50 p-4">
+            <Text className="text-center text-gray-700">Upgrade to Hoopster or Elite to enter tournaments.</Text>
             <TouchableOpacity
-              className="mt-3 bg-orange-500 rounded-xl py-3"
-              onPress={() =>
-                logAnalyticsEvent('tournament_entry', {
-                  tournamentId: tournament.id,
-                  tier: user.tier,
-                  paid: user.tier !== 'Rookie',
-                })
-              }
+              className="mt-3 rounded-xl bg-orange-500 py-3"
+              onPress={() => {
+                void Haptic.impactAsync(Haptic.ImpactFeedbackStyle.Light);
+                router.push('/(auth)/tier-selection');
+              }}
             >
-              <Text className="text-white text-center font-bold">Enter Tournament</Text>
+              <Text className="text-center font-bold text-white">View Plans</Text>
             </TouchableOpacity>
           </View>
-        ))}
-      </View>
+        }
+      >
+        <View className="px-6 mb-6 gap-3">
+          {tournaments.map((tournament) => (
+            <View key={tournament.id} className="bg-white border border-gray-200 rounded-2xl p-4">
+              <Text className="font-bold text-gray-900 text-base">{tournament.name}</Text>
+              <Text className="text-xs text-gray-600 mt-1">{tournament.minTier}+ | {tournament.stakeLabel}</Text>
+              <Text className="text-xs text-gray-600 mt-1">Venue: {tournament.venueType}</Text>
+              <TouchableOpacity
+                className="mt-3 bg-orange-500 rounded-xl py-3"
+                onPress={() =>
+                  logAnalyticsEvent('tournament_entry', {
+                    tournamentId: tournament.id,
+                    tier: user.tier,
+                    paid: user.tier !== 'Rookie',
+                  })
+                }
+              >
+                <Text className="text-white text-center font-bold">Enter Tournament</Text>
+              </TouchableOpacity>
+            </View>
+          ))}
+        </View>
+      </RequireTier>
 
       <View className="px-6 pb-10">
         <Text className="text-lg font-bold text-gray-900 mb-3">Past Winners with Video Proof</Text>

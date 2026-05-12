@@ -1,5 +1,12 @@
 import * as admin from 'firebase-admin';
 import * as functions from 'firebase-functions';
+// TODO: Migrate functions to 2nd Gen (gcfv2) + Node 22 post-launch.
+// Migration checklist:
+// - Update `functions/package.json` `engines.node` => "22"
+// - Replace or add `.runWith({ platform: 'gcfv2' })` where appropriate
+// - Verify `firebase-functions` major version and update code as needed
+// - Test locally and deploy to a staging project first
+// - Update CI/CD and IAM/service account permissions for Artifact Registry
 import Stripe from 'stripe';
 
 admin.initializeApp();
@@ -33,6 +40,16 @@ function cashoutMinimumForTier(tier: Tier): number {
   return Number.POSITIVE_INFINITY;
 }
 
+const ACTIVE_CITIES = ['San Diego', 'Miami', 'Broward'] as const;
+
+function isActiveCity(city: string): boolean {
+  return ACTIVE_CITIES.includes(city as any);
+}
+
+function normalizeMargin(margin: number): number {
+  return Math.max(0, Math.min(margin, 8));
+}
+
 function hooperTierFromLeo(score: number): string {
   if (score >= 90) return 'Legend Circuit';
   if (score >= 80) return 'Elite Run';
@@ -41,6 +58,7 @@ function hooperTierFromLeo(score: number): string {
   return 'Rising Hooper';
 }
 
+// TODO: Migrate to 2nd Gen + Node 22 post-launch
 export const createStripeCheckout = functions.https.onCall(async (data, context) => {
   const uid = requireAuth(context);
 
@@ -72,6 +90,7 @@ export const createStripeCheckout = functions.https.onCall(async (data, context)
   return { checkoutUrl: session.url, sessionId: session.id };
 });
 
+// TODO: Migrate to 2nd Gen + Node 22 post-launch
 export const stripeWebhook = functions.https.onRequest(async (req, res) => {
   if (!stripe || !stripeWebhookSecret) {
     res.status(500).send('Stripe webhook not configured.');
@@ -160,6 +179,7 @@ export const stripeWebhook = functions.https.onRequest(async (req, res) => {
   }
 });
 
+// TODO: Migrate to 2nd Gen + Node 22 post-launch
 export const requestCashout = functions.https.onCall(async (data, context) => {
   const uid = requireAuth(context);
 
@@ -168,7 +188,19 @@ export const requestCashout = functions.https.onCall(async (data, context) => {
     throw new functions.https.HttpsError('invalid-argument', 'amount must be a positive number');
   }
 
+  const authUser = await admin.auth().getUser(uid);
+  if (!authUser.emailVerified) {
+    throw new functions.https.HttpsError('failed-precondition', 'Email verification required before cashout');
+  }
+
   const userRef = db.collection('users').doc(uid);
+  const previousCashouts = await db
+    .collection('transactions')
+    .where('userId', '==', uid)
+    .where('type', '==', 'cashout')
+    .get();
+  const cashoutCount = previousCashouts.size;
+  const videoProofRequired = cashoutCount < 3;
 
   await db.runTransaction(async (tx) => {
     const snap = await tx.get(userRef);
@@ -222,19 +254,91 @@ export const requestCashout = functions.https.onCall(async (data, context) => {
       postCashoutEarnedBalance: postCashout,
       tier,
       status: 'pending_review',
+      videoProofRequired,
+      cashoutCount: cashoutCount + 1,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
     });
+  });
+
+  return { ok: true, videoProofRequired, cashoutCount: cashoutCount + 1 };
+});
+
+// TODO: Migrate to 2nd Gen + Node 22 post-launch
+export const openMatchDispute = functions.https.onCall(async (data, context) => {
+  const reporterId = requireAuth(context);
+  const reportedUserId = String(data?.reportedUserId || '').trim();
+  const matchId = String(data?.matchId || '').trim();
+  const reason = String(data?.reason || '').trim();
+
+  if (!reportedUserId || !matchId || !reason) {
+    throw new functions.https.HttpsError('invalid-argument', 'reportedUserId, matchId, and reason are required');
+  }
+
+  await db.collection('match_reports').add({
+    reporterId,
+    reportedUserId,
+    matchId,
+    reason,
+    status: 'pending',
+    timestamp: admin.firestore.FieldValue.serverTimestamp(),
   });
 
   return { ok: true };
 });
 
+// TODO: Migrate to 2nd Gen + Node 22 post-launch
+export const reportMatch = openMatchDispute;
+
+// TODO: Migrate to 2nd Gen + Node 22 post-launch
+export const sendVerificationReminder = functions.pubsub.schedule('every 1 hours').onRun(async () => {
+  const cutoff = admin.firestore.Timestamp.fromMillis(Date.now() - 1000 * 60 * 60 * 24);
+  const usersSnap = await db
+    .collection('users')
+    .where('earnedBalance', '>', 5)
+    .where('emailVerified', '==', false)
+    .where('verificationReminderQueuedAt', '<=', cutoff)
+    .get();
+
+  if (usersSnap.empty) return null;
+
+  const batch = db.batch();
+
+  for (const doc of usersSnap.docs) {
+    const user = doc.data() as any;
+    batch.set(
+      db.collection('email_reminders').doc(),
+      {
+        userId: doc.id,
+        email: String(user?.email || ''),
+        type: 'unverified_user',
+        earnedBalance: Number(user?.earnedBalance || 0),
+        timestamp: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: false }
+    );
+
+    batch.set(
+      doc.ref,
+      { verificationReminderQueuedAt: admin.firestore.FieldValue.serverTimestamp() },
+      { merge: true }
+    );
+  }
+
+  await batch.commit();
+  return null;
+});
+
+// TODO: Migrate to 2nd Gen + Node 22 post-launch
 export const submitMatchResult = functions.https.onCall(async (data, context) => {
   const uid = requireAuth(context);
 
   const opponentUid = String(data?.opponentUid || '');
   const myScore = Number(data?.myScore);
   const opponentScore = Number(data?.opponentScore);
+  const courtId = String(data?.courtId || '').trim();
+  const courtCity = String(data?.courtCity || '').trim();
+  const courtHasAdmin = Boolean(data?.courtHasAdmin);
+  const courtQrCode = String(data?.courtQrCode || '').trim();
 
   if (!opponentUid) {
     throw new functions.https.HttpsError('invalid-argument', 'opponentUid is required');
@@ -242,6 +346,10 @@ export const submitMatchResult = functions.https.onCall(async (data, context) =>
 
   if (!Number.isFinite(myScore) || !Number.isFinite(opponentScore) || myScore <= opponentScore) {
     throw new functions.https.HttpsError('invalid-argument', 'Winner score must be higher than opponent score');
+  }
+
+  if (!courtId || !courtCity || !isActiveCity(courtCity)) {
+    throw new functions.https.HttpsError('failed-precondition', 'Matches can only be submitted from active launch cities');
   }
 
   const margin = myScore - opponentScore;
@@ -253,7 +361,14 @@ export const submitMatchResult = functions.https.onCall(async (data, context) =>
     myScore,
     opponentScore,
     margin,
+    courtId,
+    courtCity,
+    courtHasAdmin,
+    courtQrCode,
+    normalizedMargin: normalizeMargin(margin),
     status: 'pending_confirmation',
+    proofRequired: true,
+    videoProofPrompted: false,
     confirmations: {
       [uid]: true,
       [opponentUid]: false,
@@ -271,9 +386,12 @@ export const submitMatchResult = functions.https.onCall(async (data, context) =>
   return { matchId: matchRef.id, status: 'pending_confirmation' };
 });
 
+// TODO: Migrate to 2nd Gen + Node 22 post-launch
 export const confirmMatchResult = functions.https.onCall(async (data, context) => {
   const uid = requireAuth(context);
   const matchId = String(data?.matchId || '');
+  const adminVerified = Boolean(data?.adminVerified);
+  const adminQrCode = String(data?.adminQrCode || '').trim();
 
   if (!matchId) {
     throw new functions.https.HttpsError('invalid-argument', 'matchId is required');
@@ -292,18 +410,30 @@ export const confirmMatchResult = functions.https.onCall(async (data, context) =
       throw new functions.https.HttpsError('failed-precondition', 'match is not pending confirmation');
     }
 
+    if (adminVerified) {
+      const adminSnap = await db.collection('admins').doc(uid).get();
+      if (!adminSnap.exists) {
+        throw new functions.https.HttpsError('permission-denied', 'Admin role required');
+      }
+      if (!adminQrCode || adminQrCode !== String(match.courtQrCode || '')) {
+        throw new functions.https.HttpsError('failed-precondition', 'Valid gym admin QR code required');
+      }
+    }
+
     const confirmations = {
       ...(match.confirmations || {}),
       [uid]: true,
     };
 
     const allConfirmed = Object.values(confirmations).every(Boolean);
+    const verifiedByAdmin = adminVerified ? uid : match.verifiedByAdmin || null;
 
     tx.set(
       ref,
       {
         confirmations,
-        status: allConfirmed ? 'confirmed' : 'pending_confirmation',
+        verifiedByAdmin,
+        status: allConfirmed || adminVerified ? 'confirmed' : 'pending_confirmation',
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       },
       { merge: true }
@@ -313,32 +443,83 @@ export const confirmMatchResult = functions.https.onCall(async (data, context) =
   return { ok: true };
 });
 
-export const openMatchDispute = functions.https.onCall(async (data, context) => {
-  const uid = requireAuth(context);
-  const matchId = String(data?.matchId || '');
-  const reason = String(data?.reason || '').trim();
+// TODO: Migrate to 2nd Gen + Node 22 post-launch
+export const autoResolveExpiredDisputes = functions.pubsub.schedule('every 1 hours').onRun(async () => {
+  const cutoff = admin.firestore.Timestamp.fromMillis(Date.now() - 1000 * 60 * 60 * 24);
+  const snapshot = await db
+    .collection('matches')
+    .where('status', '==', 'pending_confirmation')
+    .where('createdAt', '<=', cutoff)
+    .get();
 
-  if (!matchId || !reason) {
-    throw new functions.https.HttpsError('invalid-argument', 'matchId and reason are required');
-  }
+  if (snapshot.empty) return null;
 
-  await db.collection('matches').doc(matchId).set(
-    {
-      status: 'disputed',
-      dispute: {
-        open: true,
-        reason,
-        openedBy: uid,
-        adminResolution: null,
+  const batch = db.batch();
+  snapshot.docs.forEach((doc) => {
+    batch.set(
+      doc.ref,
+      {
+        status: 'confirmed',
+        autoResolvedAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       },
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-    },
-    { merge: true }
-  );
+      { merge: true }
+    );
+  });
 
-  return { ok: true };
+  await batch.commit();
+  return null;
 });
 
+// TODO: Migrate to 2nd Gen + Node 22 post-launch
+export const queueEmailVerificationReminders = functions.pubsub.schedule('every 6 hours').onRun(async () => {
+  const cutoff = admin.firestore.Timestamp.fromMillis(Date.now() - 1000 * 60 * 60 * 24);
+  const usersSnap = await db
+    .collection('users')
+    .where('earnedBalance', '>', 5)
+    .where('emailVerified', '==', false)
+    .where('verificationReminderQueuedAt', '<=', cutoff)
+    .get();
+
+  if (usersSnap.empty) return null;
+
+  const batch = db.batch();
+
+  for (const doc of usersSnap.docs) {
+    const user = doc.data() as any;
+    const email = String(user?.email || '').trim();
+    if (!email) continue;
+
+    const verificationLink = await admin.auth().generateEmailVerificationLink(email, {
+      url: 'https://hoopstakes.com/verify-email',
+    });
+
+    const reminderRef = db.collection('email_reminders').doc();
+    batch.set(reminderRef, {
+      userId: doc.id,
+      email,
+      subject: 'Verify your email to cash out on HoopStakes',
+      body: 'You have earned balance available. Verify your email to unlock cashouts.',
+      verificationLink,
+      status: 'queued',
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    batch.set(
+      doc.ref,
+      {
+        verificationReminderQueuedAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+  }
+
+  await batch.commit();
+  return null;
+});
+
+// TODO: Migrate to 2nd Gen + Node 22 post-launch
 export const ingestAnalyticsEvent = functions.https.onCall(async (data, context) => {
   const uid = context.auth?.uid || null;
   const eventName = String(data?.eventName || '').trim();
@@ -358,6 +539,7 @@ export const ingestAnalyticsEvent = functions.https.onCall(async (data, context)
   return { ok: true };
 });
 
+// TODO: Migrate to 2nd Gen + Node 22 post-launch
 export const getAdminKpis = functions.https.onCall(async (_data, context) => {
   const uid = requireAuth(context);
   const adminSnap = await db.collection('admins').doc(uid).get();
@@ -389,6 +571,7 @@ export const getAdminKpis = functions.https.onCall(async (_data, context) => {
   };
 });
 
+// TODO: Migrate to 2nd Gen + Node 22 post-launch
 export const getLeoBreakdown = functions.https.onCall(async (data, context) => {
   const uid = requireAuth(context);
   const targetUid = String(data?.targetUid || uid);
@@ -407,6 +590,7 @@ export const getLeoBreakdown = functions.https.onCall(async (data, context) => {
 
   const user = userSnap.data() as any;
   const leo = user?.leo || {};
+  const totalGames = Number(leo.totalGames || 0);
 
   const winRate = Number(leo.winRate || 0);
   const avgMargin = Number(leo.avgMargin || 0);
@@ -414,10 +598,11 @@ export const getLeoBreakdown = functions.https.onCall(async (data, context) => {
   const gamesThisWeek = Number(leo.gamesThisWeek || 0);
 
   const winRatePoints = winRate * 70;
-  const marginPoints = avgMargin * 20;
+  const marginPoints = normalizeMargin(avgMargin) * 20;
   const streakPoints = winStreak * 5;
   const activityPoints = gamesThisWeek;
   const total = Math.round(winRatePoints + marginPoints + streakPoints + activityPoints);
+  const displayLeoScore = totalGames < 3 ? Math.round(total * 0.7) : total;
 
   return {
     player: {
@@ -426,13 +611,16 @@ export const getLeoBreakdown = functions.https.onCall(async (data, context) => {
       tier: String(user?.tier || 'Rookie'),
       positionAbbr: String(user?.positionAbbr || 'G'),
       leoScore: total,
-      hooperTier: hooperTierFromLeo(total),
+      displayLeoScore,
+      hooperTier: hooperTierFromLeo(displayLeoScore),
+      isCalibrating: totalGames < 3,
     },
     metrics: {
       winRate,
       avgMargin,
       winStreak,
       gamesThisWeek,
+      totalGames,
     },
     breakdown: {
       winRatePoints,
@@ -441,6 +629,8 @@ export const getLeoBreakdown = functions.https.onCall(async (data, context) => {
       activityPoints,
       total,
     },
-    formula: 'LEO = (Win% x 70) + (Avg Margin x 20) + (Win Streak x 5) + (Games This Week x 1)',
+    formula: totalGames < 3
+      ? 'Calibrating... play 3 games for a fully stable LEO.'
+      : 'LEO = (Win% x 70) + (Avg Margin x 20) + (Win Streak x 5) + (Games This Week x 1)',
   };
 });

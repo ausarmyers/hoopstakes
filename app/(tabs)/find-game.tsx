@@ -1,18 +1,23 @@
 import { useEffect, useState } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, Alert } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, Alert, ActivityIndicator } from 'react-native';
 import { useStore } from '../../lib/store';
 import { router } from 'expo-router';
 import { getAllowedStakes, isPaidTier } from '../../lib/business-rules';
-import { getLeoSkillTier } from '../../lib/leo';
-import { collection, limit, onSnapshot, query } from 'firebase/firestore';
+import { getDisplayedLEO, getLeoSkillTier } from '../../lib/leo';
+import { collection, getDocs, limit, query, where } from 'firebase/firestore';
+import * as Haptic from 'expo-haptics';
 import { db } from '../../lib/firebase';
+import SkeletonCard from '../components/SkeletonCard';
 
 type RosterHooper = {
   id: string;
   username: string;
   positionAbbr: string;
   tier: string;
-  leo: number;
+  leo: {
+    score: number;
+    totalGames: number;
+  };
   wins: number;
   losses: number;
   venue: string;
@@ -27,7 +32,23 @@ export default function FindGame() {
   const [rosterLoading, setRosterLoading] = useState(true);
   const [rosterError, setRosterError] = useState<string | null>(null);
 
-  if (!user) return <Text className="text-center mt-10">Loading...</Text>;
+  const requireProfile = (action: () => void) => {
+    if (!user?.profileComplete) {
+      void Haptic.notificationAsync(Haptic.NotificationFeedbackType.Warning);
+      Alert.alert('Complete Profile', 'Add your position and city to play.');
+      return;
+    }
+    action();
+  };
+
+  if (!user) {
+    return (
+      <View className="flex-1 bg-gray-50 justify-center items-center p-4">
+        <ActivityIndicator size="large" color="#FF6B35" />
+        <Text className="mt-2 text-gray-500">Loading profile...</Text>
+      </View>
+    );
+  }
 
   if (!currentGym) {
     return (
@@ -57,6 +78,7 @@ export default function FindGame() {
 
   const paid = isPaidTier(user.tier);
   const allowedStakes = getAllowedStakes(user.tier);
+  const displayedLEO = getDisplayedLEO(user);
 
   useEffect(() => {
     if (!paid) {
@@ -66,12 +88,22 @@ export default function FindGame() {
       return;
     }
 
-    setRosterLoading(true);
-    const usersQuery = query(collection(db, 'users'), limit(40));
+    let cancelled = false;
 
-    const unsubscribe = onSnapshot(
-      usersQuery,
-      (snapshot) => {
+    const loadRoster = async () => {
+      setRosterLoading(true);
+      setRosterError(null);
+
+      try {
+        const usersQuery = query(
+          collection(db, 'users'),
+          where('currentGymId', '==', currentGym),
+          limit(40)
+        );
+        const snapshot = await getDocs(usersQuery);
+
+        if (cancelled) return;
+
         const next = snapshot.docs
           .map((doc) => {
             const data = doc.data() as any;
@@ -86,7 +118,10 @@ export default function FindGame() {
               username: String(data?.username || `hooper_${doc.id.slice(0, 6)}`),
               positionAbbr: String(data?.positionAbbr || 'G'),
               tier: String(data?.tier || 'Rookie'),
-              leo: Number(data?.leo?.score || 0),
+              leo: {
+                score: Number(data?.leo?.score || 0),
+                totalGames: Number(data?.leo?.totalGames || data?.totalGames || 0),
+              },
               wins: Number(data?.leo?.wins || data?.totalWins || 0),
               losses: Number(data?.leo?.losses || data?.totalLosses || 0),
               venue: String(data?.activeVenueName || data?.homeCourtName || 'Nearby court'),
@@ -95,28 +130,54 @@ export default function FindGame() {
           .filter((entry): entry is RosterHooper => Boolean(entry));
 
         setHoopers(next);
-        setRosterError(null);
-        setRosterLoading(false);
-      },
-      (error) => {
-        setRosterLoading(false);
-        setRosterError(error.message || 'Could not load live hoopers.');
+      } catch (error: any) {
+        if (!cancelled) {
+          setRosterError(error?.message || 'Could not load live hoopers.');
+          setHoopers([]);
+        }
+      } finally {
+        if (!cancelled) {
+          setRosterLoading(false);
+        }
       }
-    );
+    };
 
-    return () => unsubscribe();
+    void loadRoster();
+
+    return () => {
+      cancelled = true;
+    };
   }, [paid, currentGym, user.uid]);
 
   const handleChallenge = (opponentUsername: string) => {
+    if (!user.profileComplete) {
+      requireProfile(() => {});
+      return;
+    }
+
     if (paid && !selectedStake) {
       Alert.alert('Stake required', 'Paid users must choose a stake before challenging.');
       return;
     }
 
-    const stakeText = paid && selectedStake ? `for $${selectedStake.toFixed(2)}` : 'for XP only';
-    Alert.alert('Challenge Sent', `You challenged @${opponentUsername} ${stakeText}.`);
+    requireProfile(() => {
+      void Haptic.impactAsync(Haptic.ImpactFeedbackStyle.Medium);
+      const stakeText = paid && selectedStake ? `for $${selectedStake.toFixed(2)}` : 'for XP only';
+      Alert.alert('Challenge Sent', `You challenged @${opponentUsername} ${stakeText}.`);
+      router.push('/match-confirm');
+    });
   };
+if (rosterLoading) {
+    return (
+      <View className="flex-1 bg-gray-50 px-6 pt-8">
+        <View className="h-8 w-48 bg-gray-200 rounded mb-4" />
+        <SkeletonCard lines={3} />
+        <SkeletonCard lines={3} />
+      </View>
+    );
+  }
 
+  
   return (
     <ScrollView className="flex-1 bg-white" showsVerticalScrollIndicator={false}>
       <View className="px-6 pt-8 pb-6">
@@ -190,26 +251,37 @@ export default function FindGame() {
 
             {!rosterLoading && hoopers.length === 0 && (
               <View className="rounded-2xl border border-gray-200 p-4 bg-white">
-                <Text className="text-sm text-gray-600">No active hoopers found yet for this court.</Text>
+                <Text className="text-sm font-semibold text-gray-900 mb-1">No active hoopers yet</Text>
+                <Text className="text-sm text-gray-600">
+                  Check back soon or refresh after more players check in at this court.
+                </Text>
               </View>
             )}
 
             {hoopers.map((hooper) => {
               const games = hooper.wins + hooper.losses;
               const winRate = games > 0 ? Math.round((hooper.wins / games) * 100) : 0;
-              const leoDiff = Math.abs(user.leo.score - hooper.leo);
-              const hooperTier = getLeoSkillTier(hooper.leo);
+              const displayedHooperLEO = getDisplayedLEO({ leo: hooper.leo as any });
+              const leoDiff = Math.abs(displayedLEO - displayedHooperLEO);
+              const hooperTier = getLeoSkillTier(displayedHooperLEO);
+              const isCalibrating = hooper.leo.totalGames < 3;
 
               return (
                 <View key={hooper.id} className="rounded-2xl border border-gray-200 p-4 bg-white">
                   <View className="flex-row justify-between items-start mb-3">
                     <View>
                       <Text className="text-lg font-bold text-gray-900">@{hooper.username}</Text>
-                      <Text className="text-xs text-gray-500">{hooper.positionAbbr} | {hooperTier}</Text>
+                      <View className="flex-row items-center gap-2 mt-1">
+                        <Text className="text-xs text-gray-500">{hooper.positionAbbr}</Text>
+                        {isCalibrating && <Text className="text-xs text-gray-500">🎯 Calibrating</Text>}
+                        <View className="bg-orange-100 px-2 py-0.5 rounded-full">
+                          <Text className="text-orange-700 text-[10px] font-bold">{hooperTier}</Text>
+                        </View>
+                      </View>
                       <Text className="text-xs text-gray-500 mt-1">{hooper.venue}</Text>
                     </View>
                     <View className="bg-orange-100 px-3 py-1 rounded-full">
-                      <Text className="text-orange-700 font-bold text-xs">LEO {hooper.leo}</Text>
+                      <Text className="text-orange-700 font-bold text-xs">LEO {displayedHooperLEO}</Text>
                     </View>
                   </View>
 

@@ -1,4 +1,4 @@
-import { LeoState } from './store';
+import { LeoState, User } from './store';
 
 export interface MatchInput {
   won: boolean;
@@ -19,6 +19,21 @@ export type LeoSkillTier =
   | 'Elite Run'
   | 'Legend Circuit';
 
+export function normalizeMargin(margin: number): number {
+  return Math.max(0, Math.min(margin, 8));
+}
+
+export function getKFactor(gamesPlayed: number): number {
+  if (gamesPlayed < 10) return 40;
+  if (gamesPlayed < 30) return 32;
+  return 16;
+}
+
+export function getDisplayedLEO(user: Pick<User, 'leo'>): number {
+  const baseScore = user.leo.score || calculateLeoScore(user.leo);
+  return user.leo.totalGames < 3 ? Math.round(baseScore * 0.7) : baseScore;
+}
+
 export function calculateLeoScore(leo: LeoState): number {
   const breakdown = getLeoBreakdown(leo);
   return Math.round(
@@ -30,9 +45,11 @@ export function calculateLeoScore(leo: LeoState): number {
 }
 
 export function getLeoBreakdown(leo: LeoState): LeoBreakdown {
+  const cappedMargin = normalizeMargin(leo.avgMargin);
+
   return {
     winRatePoints: leo.winRate * 70,
-    marginPoints: leo.avgMargin * 20,
+    marginPoints: cappedMargin * 20,
     streakPoints: leo.winStreak * 5,
     activityPoints: leo.gamesThisWeek,
   };
@@ -50,8 +67,9 @@ export function applyMatchToLeo(leo: LeoState, input: MatchInput): LeoState {
   const wins = leo.wins + (input.won ? 1 : 0);
   const losses = leo.losses + (input.won ? 0 : 1);
   const totalGames = wins + losses;
+  const normalizedMargin = normalizeMargin(input.margin);
 
-  const totalMargin = leo.avgMargin * leo.totalGames + input.margin;
+  const totalMargin = leo.avgMargin * leo.totalGames + normalizedMargin;
   const avgMargin = totalGames > 0 ? totalMargin / totalGames : 0;
 
   const winStreak = input.won ? leo.winStreak + 1 : 0;

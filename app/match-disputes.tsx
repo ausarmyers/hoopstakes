@@ -1,22 +1,28 @@
 import { useState } from 'react';
 import { Alert, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { confirmMatchResult, openMatchDispute } from '../lib/backend';
+import { confirmMatchResult, reportMatch } from '../lib/backend';
 import { logAnalyticsEvent } from '../lib/telemetry';
 
 export default function MatchDisputes() {
   const [matchId, setMatchId] = useState('');
   const [reason, setReason] = useState('');
 
-  const handleConfirm = async () => {
+  const handleConfirm = async (adminVerified = false) => {
     if (!matchId.trim()) {
       Alert.alert('Missing match id', 'Enter a match id to confirm.');
       return;
     }
 
     try {
-      await confirmMatchResult(matchId.trim());
-      await logAnalyticsEvent('match_confirmed', { matchId: matchId.trim() });
-      Alert.alert('Confirmed', 'Your confirmation has been recorded.');
+      await confirmMatchResult(
+        matchId.trim(),
+        adminVerified ? { adminVerified: true, adminQrCode: adminQrCode.trim() } : undefined
+      );
+      await logAnalyticsEvent(adminVerified ? 'match_admin_verified' : 'match_confirmed', { matchId: matchId.trim() });
+      Alert.alert(
+        adminVerified ? 'Admin verified' : 'Confirmed',
+        adminVerified ? 'Gym admin verification has been recorded.' : 'Your confirmation has been recorded.'
+      );
     } catch (error: any) {
       Alert.alert('Confirmation failed', error?.message || 'Unable to confirm this match.');
     }
@@ -29,7 +35,7 @@ export default function MatchDisputes() {
     }
 
     try {
-      await openMatchDispute(matchId.trim(), reason.trim());
+      await reportMatch(matchId.trim(), reason.trim());
       await logAnalyticsEvent('match_dispute_opened', {
         matchId: matchId.trim(),
         reasonLength: reason.trim().length,
@@ -60,6 +66,9 @@ export default function MatchDisputes() {
           <TouchableOpacity onPress={handleConfirm} className="mt-3 bg-green-600 rounded-xl py-3">
             <Text className="text-white text-center font-bold">Confirm Match Result</Text>
           </TouchableOpacity>
+          <TouchableOpacity onPress={() => handleConfirm(true)} className="mt-3 border border-orange-500 rounded-xl py-3">
+            <Text className="text-orange-600 text-center font-bold">Gym Admin Verify</Text>
+          </TouchableOpacity>
         </View>
 
         <View className="bg-white border border-gray-200 rounded-2xl p-4">
@@ -81,9 +90,9 @@ export default function MatchDisputes() {
         <View className="bg-orange-50 border border-orange-200 rounded-2xl p-4">
           <Text className="font-bold text-gray-900 mb-2">Trust Rules</Text>
           <Text className="text-sm text-gray-700">
-            1. Match is pending until both players confirm.{`\n`}
+            1. Match is pending until both players confirm or a gym admin verifies it.{`\n`}
             2. Any dispute pauses payout and rank update settlement.{`\n`}
-            3. Gym admin can resolve disputed outcomes with video review.
+            3. Video proof is expected for cashout-eligible results.
           </Text>
         </View>
       </View>

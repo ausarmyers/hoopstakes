@@ -1,6 +1,9 @@
 import { View, Text, TouchableOpacity, ScrollView, Alert, Modal, TextInput } from 'react-native';
 import { useState } from 'react';
 import { useStore } from '../../lib/store';
+// TODO: Firebase - move auth email verification flow into a shared account service.
+import { auth } from '../../lib/firebase';
+import { sendEmailVerification } from 'firebase/auth';
 import {
   canCashout,
   getCashoutMinimum,
@@ -9,6 +12,8 @@ import {
 } from '../../lib/business-rules';
 import { requestCashout as requestCashoutApi } from '../../lib/backend';
 import { logAnalyticsEvent } from '../../lib/telemetry';
+import ProfileModal from '../components/ProfileModal';
+import { canPerformAction } from '../../lib/store';
 
 interface Transaction {
   id: string;
@@ -28,6 +33,8 @@ export default function Wallet() {
   ]);
   const [cashoutModalVisible, setCashoutModalVisible] = useState(false);
   const [cashoutAmount, setCashoutAmount] = useState('');
+  const [profileModalVisible, setProfileModalVisible] = useState(false);
+  const [resumeCashoutAfterProfile, setResumeCashoutAfterProfile] = useState(false);
 
   if (!user) return <Text className="p-4">Please sign in</Text>;
 
@@ -71,12 +78,33 @@ export default function Wallet() {
     };
 
     try {
-      await requestCashoutApi(amount);
+      const result = await requestCashoutApi(amount);
       await logAnalyticsEvent('cashout_requested', {
         amount,
         tier: user.tier,
         retainedBalance: user.earnedBalance - amount,
       });
+
+      if (result.videoProofRequired) {
+        Alert.alert(
+          'Record proof',
+          'Post a short withdrawal proof clip to the feed if this cashout needs review.',
+          [
+            { text: 'Later', style: 'cancel' },
+            {
+              text: 'Log reminder',
+              onPress: () => {
+                void logAnalyticsEvent('video_proof_prompted', {
+                  source: 'cashout',
+                  amount,
+                  retainedBalance: user.earnedBalance - amount,
+                  tier: user.tier,
+                });
+              },
+            },
+          ]
+        );
+      }
 
       setTransactions([tx, ...transactions]);
       setUser({ ...user, earnedBalance: user.earnedBalance - amount });
@@ -117,10 +145,62 @@ export default function Wallet() {
           )}
         </View>
 
+        {paid && !user.emailVerified && (
+          <View className="bg-yellow-50 border border-yellow-200 rounded-2xl p-4 mb-4">
+            <Text className="font-bold text-gray-900 mb-1">⚠️ Verify your email to cash out</Text>
+            <Text className="text-sm text-gray-700 mb-3">You can keep playing, but cashouts stay locked until your email is verified.</Text>
+            <TouchableOpacity
+              onPress={async () => {
+                try {
+                  const current = auth.currentUser;
+                  if (current) {
+                    await sendEmailVerification(current);
+                    Alert.alert('Sent', 'Verification email resent. Check your inbox.');
+                  } else {
+                    Alert.alert('Error', 'Unable to access auth user.');
+                  }
+                } catch (err: any) {
+                  Alert.alert('Failed', err?.message || 'Unable to send verification');
+                }
+              }}
+              className="self-start rounded-xl bg-yellow-500 px-4 py-2"
+            >
+              <Text className="text-white font-bold">Resend Verification</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
         <TouchableOpacity
           onPress={() => {
             if (!cashoutCheck.allowed) {
               Alert.alert('Cashout unavailable', cashoutCheck.reason ?? 'Not available yet.');
+              return;
+            }
+            if (!canPerformAction(user, 'cashout')) {
+              setResumeCashoutAfterProfile(true);
+              setProfileModalVisible(true);
+              return;
+            }
+            if (!user.emailVerified) {
+              Alert.alert('Email verification required', 'Verify your email before requesting cashouts.', [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                  text: 'Resend verification',
+                  onPress: async () => {
+                    try {
+                      const current = auth.currentUser;
+                      if (current) {
+                        await sendEmailVerification(current);
+                        Alert.alert('Sent', 'Verification email resent. Check your inbox.');
+                      } else {
+                        Alert.alert('Error', 'Unable to access auth user.');
+                      }
+                    } catch (err: any) {
+                      Alert.alert('Failed', err?.message || 'Unable to send verification');
+                    }
+                  },
+                },
+              ]);
               return;
             }
             setCashoutModalVisible(true);
@@ -187,6 +267,19 @@ export default function Wallet() {
           </View>
         </View>
       </Modal>
+
+      <ProfileModal
+        visible={profileModalVisible}
+        onClose={() => {
+          setProfileModalVisible(false);
+          setResumeCashoutAfterProfile(false);
+        }}
+        onSaved={() => {
+          if (resumeCashoutAfterProfile) {
+            setCashoutModalVisible(true);
+          }
+        }}
+      />
     </ScrollView>
   );
 }

@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "HoopStakes Dev",
+    "name": "HoopStakes",
     "slug": "hoopstakes-dev",
     "version": "1.0.0",
     "runtimeVersion": {
@@ -9,7 +9,10 @@
     "scheme": "hoopstakes",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
-    "platforms": ["ios", "android"],
+    "platforms": [
+      "ios",
+      "android"
+    ],
     "updates": {
       "enabled": false
     },
@@ -27,10 +30,16 @@
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "HoopStakes needs your location to find nearby gyms."
+          "locationWhenInUsePermission": "HoopStakes uses location to find nearby courts and opponents."
         }
-      ]
+      ],
+      "expo-sqlite",
+      "expo-secure-store"
     ],
+    "extra": {
+      "privacyPolicyUrl": "https://hoopstakes.com/privacy",
+      "supportEmail": "hello@hoopstakes.com"
+    },
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.hoopstakes.app",
@@ -38,7 +47,8 @@
       "infoPlist": {
         "NSCameraUsageDescription": "HoopStakes uses camera access for optional video proof on match and tournament results.",
         "NSMicrophoneUsageDescription": "HoopStakes uses microphone access for optional audio in video proof uploads.",
-        "NSPhotoLibraryUsageDescription": "HoopStakes uses your photo library for selecting match and tournament proof videos."
+        "NSPhotoLibraryUsageDescription": "HoopStakes uses your photo library for selecting match and tournament proof videos.",
+        "NSLocationWhenInUseUsageDescription": "HoopStakes uses location to find nearby courts and opponents."
       }
     },
     "android": {

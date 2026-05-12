@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "694978068662",
+    "project_id": "hoopstakes-8c579",
+    "storage_bucket": "hoopstakes-8c579.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:694978068662:android:c88efd2b836467ec1f6617",
+        "android_client_info": {
+          "package_name": "com.hoopstakes.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB14WUWKUF4xt1wmMJSZ7ajrmrgarM7FVE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

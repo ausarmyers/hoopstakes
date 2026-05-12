@@ -1,13 +1,46 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    function getUserDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function hasPaidTier() {
+      return request.auth != null
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && (
+          getUserDoc().tier in ['hoopster', 'elite', 'Hoopster', 'Elite']
+        );
+    }
+
+    function isAppAdmin() {
+      return request.auth != null
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && getUserDoc().isAdmin == true;
+    }
+
+    function isAdmin() {
+      return request.auth != null && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    function isValidCashout(tier, amount, preBalance, postBalance, emailVerified) {
+      return emailVerified == true
+        && amount > 0
+        && postBalance == preBalance - amount
+        && postBalance >= 1
+        && amount <= preBalance
+        && (
+          ((tier == 'hoopster' || tier == 'Hoopster') && amount >= 10)
+          || ((tier == 'elite' || tier == 'Elite') && amount >= 5)
+        );
+    }
+
     match /users/{userId} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null && request.auth.uid == userId;
+      allow read, write: if request.auth != null && request.auth.uid == userId;
     }
 
     match /transactions/{transactionId} {
-      allow read: if request.auth != null;
+      allow read: if request.auth != null && resource.data.userId == request.auth.uid;
       allow create: if request.auth != null
         && request.resource.data.userId == request.auth.uid
         && request.resource.data.type in ['stake', 'win', 'cashout']
@@ -17,19 +50,37 @@ service cloud.firestore {
             request.resource.data.tier,
             request.resource.data.amount,
             request.resource.data.preCashoutEarnedBalance,
-            request.resource.data.postCashoutEarnedBalance
+            request.resource.data.postCashoutEarnedBalance,
+            request.auth.token.email_verified
           )
         );
     }
-  }
 
-  function isValidCashout(tier, amount, preBalance, postBalance) {
-    return amount > 0
-      && postBalance >= 1
-      && amount <= preBalance
-      && (
-        (tier == 'hoopster' && amount >= 10)
-        || (tier == 'elite' && amount >= 5)
-      );
+    match /match_reports/{reportId} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null
+        && request.resource.data.reporterId == request.auth.uid
+        && request.resource.data.reportedMatchId is string
+        && request.resource.data.reason is string;
+      allow update: if isAdmin();
+    }
+
+    match /matches/{matchId} {
+      // TODO: Enforce server-side geofence: validate user location vs court coordinates
+      // before allowing match write. Requires Cloud Function + geospatial query.
+      allow read: if request.auth != null;
+      allow create: if request.auth != null;
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /tournaments/{tournamentId} {
+      allow read: if request.auth != null;
+      allow write: if hasPaidTier();
+    }
+
+    match /admin_actions/{actionId} {
+      allow read, write: if isAppAdmin();
+    }
   }
 }

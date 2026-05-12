@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { router } from 'expo-router';
 import { useStore } from '../lib/store';
-import { getLeoBreakdown, getLeoSkillTier } from '../lib/leo';
+import { getDisplayedLEO, getLeoBreakdown, getLeoSkillTier } from '../lib/leo';
 import { getLeoBreakdownDetails } from '../lib/backend';
 
 type RemoteBreakdown = Awaited<ReturnType<typeof getLeoBreakdownDetails>>;
@@ -16,6 +16,8 @@ export default function LeoBreakdownScreen() {
   const local = useMemo(() => {
     if (!user) return null;
     const breakdown = getLeoBreakdown(user.leo);
+    const displayedLEO = getDisplayedLEO(user);
+    const isCalibrating = user.leo.totalGames < 3;
     return {
       player: {
         uid: user.uid,
@@ -23,19 +25,24 @@ export default function LeoBreakdownScreen() {
         tier: user.tier,
         positionAbbr: user.positionAbbr,
         leoScore: user.leo.score,
-        hooperTier: getLeoSkillTier(user.leo.score),
+        displayLeoScore: displayedLEO,
+        hooperTier: getLeoSkillTier(displayedLEO),
+        isCalibrating,
       },
       metrics: {
         winRate: user.leo.winRate,
         avgMargin: user.leo.avgMargin,
         winStreak: user.leo.winStreak,
         gamesThisWeek: user.leo.gamesThisWeek,
+        totalGames: user.leo.totalGames,
       },
       breakdown: {
         ...breakdown,
         total: user.leo.score,
       },
-      formula: 'LEO = (Win% x 70) + (Avg Margin x 20) + (Win Streak x 5) + (Games This Week x 1)',
+      formula: isCalibrating
+        ? 'Calibrating... play 3 games for a fully stable LEO.'
+        : 'LEO = (Win% x 70) + (Avg Margin x 20) + (Win Streak x 5) + (Games This Week x 1)',
     };
   }, [user]);
 
@@ -91,7 +98,10 @@ export default function LeoBreakdownScreen() {
           <Text className="text-base font-bold text-gray-900">{data.player.name}</Text>
           <Text className="text-sm text-gray-600 mt-1">{data.player.positionAbbr} | {data.player.tier}</Text>
           <Text className="text-sm text-gray-600">Hooper Tier: {data.player.hooperTier}</Text>
-          <Text className="text-4xl font-bold text-orange-500 mt-3">{data.player.leoScore}</Text>
+          <Text className="text-4xl font-bold text-orange-500 mt-3">{data.player.displayLeoScore ?? data.player.leoScore}</Text>
+          <Text className="text-xs text-gray-500 mt-2">
+            {data.player.isCalibrating ? 'Calibrating... (play 3 games for full ranking)' : 'Transparent point sources shown below.'}
+          </Text>
         </View>
 
         {loading && (
@@ -113,6 +123,9 @@ export default function LeoBreakdownScreen() {
           <Text className="text-sm text-gray-700">Average margin: {data.metrics.avgMargin.toFixed(1)}</Text>
           <Text className="text-sm text-gray-700">Win streak: {data.metrics.winStreak}</Text>
           <Text className="text-sm text-gray-700">Games this week: {data.metrics.gamesThisWeek}</Text>
+          {'totalGames' in data.metrics && (
+            <Text className="text-sm text-gray-700">Games played: {data.metrics.totalGames}</Text>
+          )}
         </View>
 
         <View className="rounded-2xl border border-gray-200 bg-white p-4 mb-4">

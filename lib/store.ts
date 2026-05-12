@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { ACTIVE_CITIES } from '../app/data/courts';
 
 export type Tier = 'Rookie' | 'Hoopster' | 'Elite';
 export type PositionAbbr = 'PG' | 'SG' | 'SF' | 'PF' | 'C' | 'G' | 'F';
@@ -30,7 +31,18 @@ export interface User {
   name: string;
   username: string;
   email: string;
+  displayName?: string;
+  city?: string;
+  age?: number | null;
   positionAbbr: PositionAbbr;
+  emailVerified?: boolean;
+  profile?: {
+    displayName: string;
+    city: string;
+    position: Exclude<PositionAbbr, 'G' | 'F'>;
+    age?: number | null;
+  };
+  profileComplete?: boolean;
   tier: Tier;
   gameplayBalance: number;
   earnedBalance: number;
@@ -90,7 +102,11 @@ export const useStore = create<StoreState>((set) => ({
     name: 'Ausar Myers',
     username: 'ausarmyers',
     email: 'ausar@example.com',
+    displayName: 'Ausar',
+    city: 'San Diego',
+    age: 28,
     positionAbbr: 'SG',
+    emailVerified: true,
     tier: 'Elite',
     gameplayBalance: 10,
     earnedBalance: 7.25,
@@ -120,7 +136,7 @@ export const useStore = create<StoreState>((set) => ({
   },
   setUser: (userOrFn) =>
     set((s) => ({ user: typeof userOrFn === 'function' ? (userOrFn as any)(s.user) : userOrFn })),
-  currentGym: 'USD_MAIN',
+  currentGym: null,
   setCurrentGym: (gymId) => set({ currentGym: gymId }),
   selectedStake: 0.5,
   setSelectedStake: (stake) => set({ selectedStake: stake }),
@@ -146,3 +162,30 @@ export const useStore = create<StoreState>((set) => ({
   ],
   gyms: MOCK_GYMS,
 }));
+
+export const isProfileComplete = (user: User | null) => {
+  if (!user) return false;
+  const hasDisplay = !!user.displayName && user.displayName.trim().length > 0;
+  const hasCity = !!user.city && user.city.trim().length > 0;
+  const allowedPositions = ['PG', 'SG', 'SF', 'PF', 'C'];
+  const hasPosition = !!user.positionAbbr && allowedPositions.includes(user.positionAbbr);
+  return hasDisplay && hasCity && hasPosition;
+};
+
+export const canPerformAction = (
+  user: User | null,
+  action: 'check_in' | 'submit_match' | 'cashout'
+) => {
+  if (!user) return false;
+  if (!isProfileComplete(user)) return false;
+
+  if (action === 'cashout' && !user.emailVerified) return false;
+  if (action === 'check_in' && (!user.city || !ACTIVE_CITIES.includes(user.city as any))) return false;
+
+  return true;
+};
+
+export const canChangePosition = (user: User | null) => {
+  if (!user) return false;
+  return user.leo?.totalGames >= 5;
+};
