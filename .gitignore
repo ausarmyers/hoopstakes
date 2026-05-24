@@ -220,7 +220,6 @@ node_modules/
 .expo/
 ios/build/
 android/build/
-android/gradle/
 !android/gradle/wrapper/gradle-wrapper.jar
 !android/gradle/wrapper/gradle-wrapper.properties
 build/
