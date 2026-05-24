@@ -21,13 +21,12 @@
         "distribution": "store"
       },
       "autoIncrement": true,
-      "channel": "production"
+      "channel": "production",
+      "hooks": {
+        "pre-build": "bash scripts/debug-gradle-wrapper.sh"
+      }
     }
   },
-  "hooks": {
-    "pre-build": "bash scripts/debug-gradle-wrapper.sh"
-  },
-
   "submit": {
     "production": {
       "ios": {
