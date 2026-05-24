@@ -22,10 +22,7 @@
       },
       "autoIncrement": true,
       "channel": "production",
-      "hooks": {
-        "pre-build": "bash scripts/debug-gradle-wrapper.sh"
-      }
-    }
+
   },
   "submit": {
     "production": {
