@@ -15,16 +15,16 @@
     },
     "production": {
       "android": {
-        "buildType": "app-bundle",
-        "hooks": {
-          "pre-build": "bash scripts/debug-gradle-wrapper.sh"
-        }
+        "buildType": "app-bundle"
       },
       "ios": {
         "distribution": "store"
       },
       "autoIncrement": true,
-      "channel": "production"
+      "channel": "production",
+      "hooks": {
+        "pre-build": "bash scripts/debug-gradle-wrapper.sh"
+      }
     }
   },
   "submit": {
