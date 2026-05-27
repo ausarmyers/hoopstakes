@@ -1,10 +1,10 @@
 // Top-level build file where you can add configuration options common to all sub-projects/modules.
 
 ext {
-  // Pin Kotlin to a 1.9.x release compatible with KSP used by Expo/React Native
-  kotlinVersion = '1.9.10'
-  // Match a KSP version compatible with Kotlin 1.9.10
-  kspVersion = '1.9.10-1.0.11'
+  // Match the Kotlin version used by the installed Expo/React Native Android build plugins.
+  kotlinVersion = '2.1.20'
+  // Match the KSP version compatible with Kotlin 2.1.20.
+  kspVersion = '2.1.20-2.0.1'
 }
 
 buildscript {
@@ -15,7 +15,7 @@ buildscript {
   dependencies {
     classpath('com.android.tools.build:gradle')
     classpath('com.facebook.react:react-native-gradle-plugin')
-    classpath('org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.10')
+    classpath('org.jetbrains.kotlin:kotlin-gradle-plugin:2.1.20')
     classpath('com.google.gms:google-services:4.4.4')
   }
 }
