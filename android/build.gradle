@@ -15,8 +15,7 @@ buildscript {
   dependencies {
     classpath('com.android.tools.build:gradle')
     classpath('com.facebook.react:react-native-gradle-plugin')
-    // Use the pinned Kotlin Gradle plugin version
-    classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:${kotlinVersion}")
+    classpath('org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.10')
     classpath('com.google.gms:google-services:4.4.4')
   }
 }
